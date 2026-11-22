@@ -1,16 +1,20 @@
 // Live trip tracking: status + driver position via Supabase Realtime, re-matching while
-// searching, cancel, mobile money payment at the end (cash is settled by the driver), rating.
+// searching (pg_cron also re-matches server-side), road route line, SOS + share trip, cancel,
+// mobile money payment at the end (cash is settled by the driver), rating and receipt.
 import { router, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import { Text, View } from "react-native";
-import MapView, { Marker } from "react-native-maps";
+import MapView, { Marker, Polyline } from "react-native-maps";
 import { PayModal } from "../../components/PayModal";
+import { SosButton } from "../../components/SosButton";
 import { Stars } from "../../components/Stars";
 import { Button, Muted, Row } from "../../components/ui";
 import { api } from "../../lib/api";
 import { fcfa } from "../../lib/format";
 import { useI18n } from "../../lib/i18n";
+import { toCoords } from "../../lib/polyline";
 import { useRealtimeRow } from "../../lib/realtime";
+import { shareText, tripShareUrl } from "../../lib/share";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../lib/theme";
 import type { DriverRow, Trip } from "../../lib/types";
@@ -41,12 +45,14 @@ export default function TripScreen() {
     })();
   }, [trip?.driver_id]);
 
-  // While searching, re-run matching every 15 s (offers expire after 30 s).
+  // While searching, nudge matching every 20 s (the pg_cron scheduler also re-offers every 10 s).
+  const searching = !!trip && ["requested", "offered"].includes(trip.status);
+  const tripId = trip?.id ?? null;
   useEffect(() => {
-    if (!trip || !["requested", "offered"].includes(trip.status)) return;
-    const timer = setInterval(() => api.rematch({ trip_id: trip.id }).catch(() => undefined), 15_000);
+    if (!searching || !tripId) return;
+    const timer = setInterval(() => api.rematch({ trip_id: tripId }).catch(() => undefined), 20_000);
     return () => clearInterval(timer);
-  }, [trip]);
+  }, [searching, tripId]);
 
   const cancel = useCallback(async () => {
     const { error } = await supabase.rpc("cancel_trip", { p_trip_id: id });
@@ -61,6 +67,9 @@ export default function TripScreen() {
 
   if (!trip) return <View style={{ flex: 1 }} />;
   const needsPayment = trip.status === "completed" && trip.payment_method !== "cash" && trip.payment_status !== "paid";
+  const due = trip.amount_due_xaf ?? trip.fare_xaf;
+  const live = ["accepted", "arrived", "in_progress"].includes(trip.status);
+  const route = toCoords(trip.route_polyline);
 
   return (
     <View style={{ flex: 1 }}>
@@ -75,21 +84,34 @@ export default function TripScreen() {
             <Text style={{ fontSize: 28 }}>{ICON[trip.vehicle_type]}</Text>
           </Marker>
         ) : null}
+        {route.length > 1 ? <Polyline coordinates={route} strokeColor={colors.green} strokeWidth={5} lineDashPattern={trip.route_source === "estimate" ? [8, 8] : undefined} /> : null}
       </MapView>
+      {live || searching ? (
+        <View style={{ position: "absolute", top: 48, left: 12, right: 12, flexDirection: "row", justifyContent: "space-between" }}>
+          <SosButton tripId={trip.id} />
+          <Button title={t("shareTrip")} variant="secondary" onPress={() => shareText(t("shareMessage", { url: tripShareUrl(trip.share_token) }))} />
+        </View>
+      ) : null}
       <View style={{ backgroundColor: "#fff", padding: 16, gap: 8, borderTopLeftRadius: 20, borderTopRightRadius: 20 }}>
         <Text style={{ fontSize: 20, fontWeight: "800" }}>{t(`st_${trip.status}`)}</Text>
         <Row>
           <Text style={{ flex: 1 }}>{`${ICON[trip.vehicle_type]} ${t(trip.vehicle_type)}`}</Text>
-          <Text style={{ fontWeight: "800" }}>{fcfa(trip.fare_xaf, lang)}</Text>
+          <Text style={{ fontWeight: "800" }}>{fcfa(due, lang)}</Text>
         </Row>
+        {trip.discount_xaf > 0 ? <Muted>{`${t("fare")} ${fcfa(trip.fare_xaf, lang)} · ${t("discount")} -${fcfa(trip.discount_xaf, lang)} (${trip.promo_code ?? ""})`}</Muted> : null}
         {driverInfo ? <Muted>{`${driverInfo.name} · ⭐ ${driver?.rating_avg ?? "-"} · ${driverInfo.vehicle} · ${driverInfo.plate}`}</Muted> : null}
         {err ? <Text style={{ color: colors.red }}>{err}</Text> : null}
 
         {trip.status === "no_drivers" ? <Button title={t("retry")} onPress={() => api.rematch({ trip_id: trip.id })} /> : null}
         {["requested", "offered", "accepted", "arrived", "no_drivers"].includes(trip.status) ? <Button title={t("cancel")} variant="danger" onPress={cancel} /> : null}
 
-        {needsPayment ? <Button title={t("payNow", { amount: fcfa(trip.fare_xaf, lang) })} onPress={() => setPayOpen(true)} /> : null}
-        {trip.status === "completed" && trip.payment_status === "paid" ? <Muted>{`✅ ${t("paid")}`}</Muted> : null}
+        {needsPayment ? <Button title={t("payNow", { amount: fcfa(due, lang) })} onPress={() => setPayOpen(true)} /> : null}
+        {trip.status === "completed" && trip.payment_status === "paid" ? (
+          <Row>
+            <Text style={{ flex: 1 }}>{`✅ ${t("paid")}`}</Text>
+            <Button title={t("viewReceipt")} variant="secondary" onPress={() => router.push(`/receipt/${trip.id}?kind=trip`)} />
+          </Row>
+        ) : null}
 
         {trip.status === "completed" && !rated ? (
           <>
@@ -104,7 +126,7 @@ export default function TripScreen() {
       <PayModal
         visible={payOpen}
         target={{ trip_id: trip.id }}
-        amount={trip.fare_xaf}
+        amount={due}
         defaultMethod={trip.payment_method === "orange" ? "orange" : "mtn"}
         onClose={() => setPayOpen(false)}
         onPaid={() => setPayOpen(false)}

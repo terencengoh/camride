@@ -44,3 +44,6 @@ yarn-error.*
 .env
 .env.*
 !.env.example
+
+# generated from assets/*.png.b64 by scripts/decode-assets.js
+assets/*.png
