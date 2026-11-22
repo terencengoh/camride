@@ -1,8 +1,8 @@
 import { router } from "expo-router";
 import { useEffect, useState } from "react";
-import { Text } from "react-native";
-import { Button, Card, Chip, H1, Muted, Row, Screen } from "../components/ui";
-import { api } from "../lib/api";
+import { Text, TextInput } from "react-native";
+import { Button, Card, Chip, H1, Muted, Row, Screen, styles as ui } from "../components/ui";
+import { api, type OrderQuote } from "../lib/api";
 import { useCart } from "../lib/cart";
 import { fcfa } from "../lib/format";
 import { useI18n } from "../lib/i18n";
@@ -17,10 +17,28 @@ export default function Checkout() {
   const [pay, setPay] = useState<PayMethod>("mtn");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [promoInput, setPromoInput] = useState("");
+  const [promo, setPromo] = useState("");
+  const [quoteState, setQuoteState] = useState<{ key: string; quote: OrderQuote | null; error?: string } | null>(null);
 
   useEffect(() => {
     locate().then((r) => setPoint(r.point));
   }, []);
+
+  const items = cart.lines.map((l) => ({ menu_item_id: l.item.id, quantity: l.quantity }));
+  const quoteKey = point && cart.restaurantId ? `${cart.restaurantId}|${JSON.stringify(items)}|${point.lat},${point.lng}|${promo}` : null;
+  const quoteData = quoteState?.key === quoteKey ? quoteState : null;
+  useEffect(() => {
+    if (!quoteKey || !cart.restaurantId || !point) return;
+    let active = true;
+    const parsed = JSON.parse(quoteKey.split("|")[1]) as { menu_item_id: string; quantity: number }[];
+    api.quoteOrder(cart.restaurantId, parsed, point, "cash", promo)
+      .then((q) => active && setQuoteState({ key: quoteKey, quote: q }))
+      .catch((e) => active && setQuoteState({ key: quoteKey, quote: null, error: (e as Error).message }));
+    return () => {
+      active = false;
+    };
+  }, [quoteKey, cart.restaurantId, point, promo]);
 
   const place = async () => {
     if (!cart.restaurantId || !point) return;
@@ -29,9 +47,10 @@ export default function Checkout() {
     try {
       const { order } = await api.createOrder(
         cart.restaurantId,
-        cart.lines.map((l) => ({ menu_item_id: l.item.id, quantity: l.quantity })),
+        items,
         point,
         pay,
+        quoteData?.quote && quoteData.quote.discount_xaf > 0 ? promo : undefined,
       );
       cart.clear();
       router.replace(`/order/${order.id}`);
@@ -56,8 +75,29 @@ export default function Checkout() {
           <Text style={{ flex: 1, fontWeight: "700" }}>{t("subtotal")}</Text>
           <Text style={{ fontWeight: "700" }}>{fcfa(cart.subtotal, lang)}</Text>
         </Row>
-        <Muted>{`${t("deliveryFee")}: calculated by distance`}</Muted>
+        {quoteData?.quote ? (
+          <>
+            <Row>
+              <Text style={{ flex: 1 }}>{t("deliveryFee")}</Text>
+              <Text>{fcfa(quoteData.quote.delivery_fee_xaf, lang)}</Text>
+            </Row>
+            {quoteData.quote.discount_xaf > 0 ? (
+              <Row>
+                <Text style={{ flex: 1 }}>{`${t("discount")} ${promo}`}</Text>
+                <Text>{`-${fcfa(quoteData.quote.discount_xaf, lang)}`}</Text>
+              </Row>
+            ) : null}
+            <Row>
+              <Text style={{ flex: 1, fontWeight: "800" }}>{t("total")}</Text>
+              <Text style={{ fontWeight: "800" }}>{fcfa(quoteData.quote.total_xaf, lang)}</Text>
+            </Row>
+          </>
+        ) : <Muted>{quoteData?.error ?? "…"}</Muted>}
       </Card>
+      <Row>
+        <TextInput style={[ui.input, { flex: 1 }]} placeholder={t("promoCode")} autoCapitalize="characters" value={promoInput} onChangeText={setPromoInput} />
+        <Chip label={t("apply")} onPress={() => setPromo(promoInput.trim().toUpperCase())} />
+      </Row>
       <Card>
         <Muted>{t("deliverTo")}</Muted>
         <Text>{point ? `📍 ${t("currentLocation")}` : "…"}</Text>
