@@ -1,14 +1,18 @@
 // Driver / courier console: go online, stream foreground location to update_my_location,
 // receive offers via Realtime (offered_driver_id / offered_courier_id), accept/decline,
-// and advance the active job. Background location is a TODO (expo-task-manager).
+// and advance the active job. While online, location keeps flowing in the background through an
+// expo-task-manager task (after a prominent disclosure + "Allow all the time"); otherwise only while open.
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Location from "expo-location";
 import { router } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Switch, Text } from "react-native";
 import { Button, Card, H1, Muted, Row, Screen } from "../../components/ui";
 import { useAuth } from "../../lib/auth";
+import { backgroundPermissionGranted, requestBackgroundPermission, startBackgroundLocation, stopBackgroundLocation } from "../../lib/backgroundLocation";
 import { fcfa, km } from "../../lib/format";
 import { useI18n } from "../../lib/i18n";
+import { unregisterPush } from "../../lib/push";
 import { useRealtimeQuery } from "../../lib/realtime";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../lib/theme";
@@ -23,6 +27,8 @@ const NEXT_TRIP: Partial<Record<TripStatus, { to: TripStatus; key: "arrived" | "
 const OFFERED = ["offered"] as const;
 const TRIP_ACTIVE = ["accepted", "arrived", "in_progress"] as const;
 const ORDER_ACTIVE = ["accepted", "preparing", "ready", "picked_up"] as const;
+const TRIP_DONE = ["completed"] as const;
+const BG_CHOICE_KEY = "camride.bgLocationChoice";
 
 export default function DriverScreen() {
   const { t, lang } = useI18n();
@@ -47,10 +53,25 @@ export default function DriverScreen() {
   }, [fetchMe]);
 
   const online = me?.status === "available" || me?.status === "busy";
+  const [bgRunning, setBgRunning] = useState(false);
+  const [disclosure, setDisclosure] = useState(false);
+  const bgNotice = { title: t("bgNotifTitle"), body: t("bgNotifBody") };
 
-  // Foreground location streaming while online.
+  // Background task while online (only if the permission was already granted after the disclosure).
   useEffect(() => {
     if (!online) return;
+    let active = true;
+    startBackgroundLocation({ title: t("bgNotifTitle"), body: t("bgNotifBody") })
+      .then((ok) => active && setBgRunning(ok))
+      .catch(() => active && setBgRunning(false));
+    return () => {
+      active = false;
+    };
+  }, [online, t]);
+
+  // Foreground location streaming while online (when the background task is not running).
+  useEffect(() => {
+    if (!online || bgRunning) return;
     let cancelled = false;
     (async () => {
       const { status } = await Location.requestForegroundPermissionsAsync();
@@ -71,13 +92,25 @@ export default function DriverScreen() {
       watcher.current?.remove();
       watcher.current = null;
     };
-  }, [online, t]);
+  }, [online, bgRunning, t]);
 
   const toggle = async (value: boolean) => {
     setErr(null);
     const { error } = await supabase.rpc("set_driver_status", { p_status: value ? "available" : "offline" });
     if (error) setErr(error.message);
+    if (!value) {
+      await stopBackgroundLocation();
+      setBgRunning(false);
+    } else if (!error && !(await backgroundPermissionGranted()) && !(await AsyncStorage.getItem(BG_CHOICE_KEY))) {
+      setDisclosure(true); // prominent disclosure before asking for background location
+    }
     loadMe();
+  };
+
+  const answerDisclosure = async (allow: boolean) => {
+    setDisclosure(false);
+    await AsyncStorage.setItem(BG_CHOICE_KEY, allow ? "background" : "foreground");
+    if (allow && (await requestBackgroundPermission())) setBgRunning(await startBackgroundLocation(bgNotice));
   };
 
   // Offers + active jobs (RLS limits rows to this driver).
@@ -85,6 +118,7 @@ export default function DriverScreen() {
   const activeTrips = useRealtimeQuery<Trip>("trips", "driver_id", uid, TRIP_ACTIVE);
   const orderOffers = useRealtimeQuery<Order>("orders", "offered_courier_id", uid);
   const activeOrders = useRealtimeQuery<Order>("orders", "courier_id", uid, ORDER_ACTIVE);
+  const unpaidTrips = useRealtimeQuery<Trip>("trips", "driver_id", uid, TRIP_DONE).filter((tr) => tr.payment_status !== "paid").slice(0, 3);
 
   const rpc = async (fn: string, args: Record<string, unknown>) => {
     setErr(null);
@@ -112,7 +146,29 @@ export default function DriverScreen() {
         <Switch value={online} onValueChange={toggle} disabled={!me.documents_verified || me.status === "busy"} />
       </Row>
       <Muted>{`⭐ ${me.rating_avg} · ${t(me.vehicle_type)}`}</Muted>
+      {online && bgRunning ? <Muted>{`📍 ${t("bgActive")}`}</Muted> : null}
+      {disclosure ? (
+        <Card style={{ borderColor: colors.green, borderWidth: 2 }}>
+          <Text style={{ fontWeight: "800", fontSize: 16 }}>{t("bgTitle")}</Text>
+          <Text style={{ color: colors.ink }}>{t("bgBody")}</Text>
+          <Row>
+            <Button title={t("bgAllow")} onPress={() => answerDisclosure(true)} />
+            <Button title={t("bgNotNow")} variant="secondary" onPress={() => answerDisclosure(false)} />
+          </Row>
+        </Card>
+      ) : null}
+      <Row>
+        <Button title={t("documents")} variant="secondary" onPress={() => router.push("/driver/documents")} />
+        <Button title={t("earnings")} variant="secondary" onPress={() => router.push("/driver/earnings")} />
+        <Button title={t("support")} variant="secondary" onPress={() => router.push("/support")} />
+      </Row>
       {err ? <Text style={{ color: colors.red }}>{err}</Text> : null}
+      {unpaidTrips.map((tr) => (
+        <Card key={tr.id}>
+          <Text style={{ fontWeight: "800" }}>{`${t("st_completed")} · ${fcfa(tr.amount_due_xaf, lang)} · ${tr.payment_method.toUpperCase()} · ${tr.payment_status}`}</Text>
+          <Button title={t("recordCash")} variant="secondary" onPress={() => rpc("driver_record_cash", { p_trip_id: tr.id })} />
+        </Card>
+      ))}
 
       {tripOffers.map((tr) => (
         <Card key={tr.id}>
@@ -141,7 +197,7 @@ export default function DriverScreen() {
           <Card key={tr.id}>
             <Text style={{ fontWeight: "800" }}>{`${t(`st_${tr.status}`)} · ${fcfa(tr.fare_xaf, lang)}`}</Text>
             <Muted>{`${tr.pickup_address ?? `${tr.pickup_lat.toFixed(4)}, ${tr.pickup_lng.toFixed(4)}`} → ${tr.dropoff_address ?? `${tr.dropoff_lat.toFixed(4)}, ${tr.dropoff_lng.toFixed(4)}`}`}</Muted>
-            {tr.payment_method === "cash" ? <Muted>{t("collectCash", { amount: fcfa(tr.fare_xaf, lang) })}</Muted> : null}
+            {tr.payment_method === "cash" ? <Muted>{t("collectCash", { amount: fcfa(tr.amount_due_xaf, lang) })}</Muted> : null}
             {next ? <Button title={t(next.key)} onPress={() => rpc("advance_trip", { p_trip_id: tr.id, p_to: next.to })} /> : null}
           </Card>
         );
@@ -155,7 +211,7 @@ export default function DriverScreen() {
         </Card>
       ))}
       {tripOffers.length + orderOffers.length + activeTrips.length + activeOrders.length === 0 && online ? <Muted>{t("waitingRequests")}</Muted> : null}
-      <Button title={t("signOut")} variant="danger" onPress={async () => { await toggle(false); await signOut(); router.replace("/sign-in"); }} />
+      <Button title={t("signOut")} variant="danger" onPress={async () => { await toggle(false); await unregisterPush(); await signOut(); router.replace("/sign-in"); }} />
     </Screen>
   );
 }
