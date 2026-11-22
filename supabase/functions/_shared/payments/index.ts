@@ -30,12 +30,26 @@ export function getProvider(name?: string, env: Env = (k) => Deno.env.get(k)): P
         baseUrl: env("NOTCHPAY_BASE_URL") ?? "https://api.notchpay.co",
         publicKey: need(env, "NOTCHPAY_PUBLIC_KEY"),
         webhookHashKey: need(env, "NOTCHPAY_WEBHOOK_HASH"),
+        privateKey: env("NOTCHPAY_PRIVATE_KEY"),
       });
     case "cinetpay":
-      return new CinetPayProvider();
+      return new CinetPayProvider({
+        apiKey: need(env, "CINETPAY_API_KEY"),
+        siteId: need(env, "CINETPAY_SITE_ID"),
+        secretKey: need(env, "CINETPAY_SECRET_KEY"),
+        notifyUrl: need(env, "CINETPAY_NOTIFY_URL"),
+        returnUrl: env("CINETPAY_RETURN_URL") ?? "https://example.invalid/camride/paid",
+        transferPassword: env("CINETPAY_TRANSFER_PASSWORD"),
+        transferNotifyUrl: env("CINETPAY_TRANSFER_NOTIFY_URL"),
+      });
     default:
       throw new Error(`unknown payment provider ${chosen}`);
   }
+}
+
+/** Provider used for payouts and refunds (defaults to the collection provider). */
+export function getPayoutProvider(env: Env = (k) => Deno.env.get(k)): PaymentProvider {
+  return getProvider(env("PAYOUT_PROVIDER") ?? env("PAYMENT_PROVIDER") ?? "campay", env);
 }
 
 export * from "./types.ts";
