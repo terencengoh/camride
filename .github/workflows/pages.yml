@@ -3,6 +3,7 @@ name: Deploy GitHub Pages
 on:
   push:
     branches: [main]
+    paths-ignore: ["mobile/**", "supabase/**", "docs/**", ".github/workflows/ci.yml"]
   workflow_dispatch:
 
 permissions:
@@ -25,7 +26,8 @@ jobs:
       - name: Build site into _site
         run: |
           mkdir -p _site
-          rsync -a --exclude='.git' --exclude='.github' --exclude='_site' --exclude='*.b64' ./ _site/
+          # Only the static demo is published; the platform code (mobile/, supabase/, docs/) is excluded.
+          rsync -a --exclude='.git' --exclude='.github' --exclude='_site' --exclude='*.b64' --exclude='mobile' --exclude='supabase' --exclude='docs' --exclude='node_modules' --exclude='.gitignore' ./ _site/
           base64 -d icon-192.b64 > _site/icon-192.png
           base64 -d icon-512.b64 > _site/icon-512.png
           touch _site/.nojekyll
