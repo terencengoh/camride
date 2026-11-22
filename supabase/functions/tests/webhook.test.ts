@@ -167,3 +167,34 @@ Deno.test("notchpay initiate: create then process with cm.orange channel", async
   assertEquals(calls[1].url, "https://api.notchpay.co/payments/np_ref");
   assertEquals(calls[1].body, { channel: "cm.orange", data: { phone: "+237699999999" } });
 });
+
+// ---------- Transfer events (payouts / refunds) ----------
+Deno.test("notchpay transfer webhook settles the payout once via settleTransfer", async () => {
+  const { store } = memoryStore([]);
+  const settled: string[] = [];
+  store.settleTransfer = (ref, status) => (settled.push(`${ref}:${status}`), Promise.resolve(true));
+  const ref = `po-${PAY_ID}`;
+  const evt = { id: "evt_t1", type: "transfer.complete", data: { id: "trf_1", reference: ref, amount: 2500, status: "complete" } };
+  assertEquals(await processWebhook(notch, await notchRequest(evt), store), { result: "transfer_processed", reference: ref, status: "successful" });
+  assertEquals((await processWebhook(notch, await notchRequest(evt), store)).result, "duplicate");
+  const failed = { id: "evt_t2", type: "transfer.failed", data: { id: "trf_2", reference: `rf-${PAY_ID}` } };
+  assertEquals((await processWebhook(notch, await notchRequest(failed), store)), { result: "transfer_processed", reference: `rf-${PAY_ID}`, status: "failed" });
+  assertEquals(settled, [`${ref}:successful`, `rf-${PAY_ID}:failed`]);
+});
+
+Deno.test("campay withdrawal callback (external_reference po-/rf-) is a transfer event", async () => {
+  const cp = new CamPayProvider({ baseUrl: "https://demo.campay.net/api", username: "u", password: "p", webhookKey: "wk" });
+  const sig = await signHs256Jwt({ iat: 1 }, "wk");
+  const url = `https://x/payments-webhook?provider=campay&status=SUCCESSFUL&reference=cpw-1&amount=2500&external_reference=po-${PAY_ID}&signature=${sig}`;
+  const evt = await cp.verifyWebhook({ method: "GET", url, headers: new Headers(), rawBody: "" });
+  assertEquals([evt.kind, evt.reference, evt.paymentId, evt.status], ["transfer", `po-${PAY_ID}`, null, "successful"]);
+});
+
+Deno.test("transfer events with unknown references are recorded but not applied", async () => {
+  const { store } = memoryStore([]);
+  let called = false;
+  store.settleTransfer = () => ((called = true), Promise.resolve(true));
+  const evt = { id: "evt_t3", type: "transfer.complete", data: { id: "trf_3", reference: "something-else" } };
+  assertEquals((await processWebhook(notch, await notchRequest(evt), store)).result, "unknown_payment");
+  assertEquals(called, false);
+});

@@ -65,3 +65,18 @@ verify_jwt = true
 
 [functions.payments-initiate]
 verify_jwt = true
+
+# Public, auto-refreshing share page / JSON for a live trip (token-protected, expires after 24 h).
+[functions.trip-share]
+verify_jwt = false
+
+# Service-role only (pg_cron + pg_net); checks the bearer itself.
+[functions.notify]
+verify_jwt = true
+
+# Admin dashboard only (role checked inside).
+[functions.payouts-process]
+verify_jwt = true
+
+[functions.refunds-process]
+verify_jwt = true
