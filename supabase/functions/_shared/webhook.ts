@@ -23,16 +23,20 @@ export interface WebhookStore {
   settlePayment(paymentId: string, status: "successful" | "failed", providerRef: string | null, failureReason: string | null): Promise<boolean>;
   /** Marks the trip/order as paid (and a pending_payment order as placed) or failed. */
   applyToTarget(payment: PaymentRecord, status: "successful" | "failed"): Promise<void>;
+  /** Final result of a payout ("po-<uuid>") or refund ("rf-<uuid>") transfer; idempotent. Returns false if unknown. */
+  settleTransfer?(reference: string, status: "successful" | "failed", providerRef: string | null, reason: string | null): Promise<boolean>;
 }
 
 export type WebhookOutcome =
   | { result: "processed"; paymentId: string; status: "successful" | "failed" }
+  | { result: "transfer_processed"; reference: string; status: "successful" | "failed" }
   | { result: "duplicate" | "ignored" | "unknown_payment" | "already_settled"; paymentId?: string };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function processWebhook(provider: PaymentProvider, req: WebhookRequest, store: WebhookStore): Promise<WebhookOutcome> {
   const event: NormalizedEvent = await provider.verifyWebhook(req); // throws WebhookVerificationError
+  if (event.kind === "transfer") return await processTransferEvent(provider.name, event, store);
   const paymentId = event.paymentId && UUID_RE.test(event.paymentId) ? event.paymentId : null;
   const payment = await store.findPayment(provider.name, paymentId, event.providerRef);
 
@@ -52,4 +56,17 @@ export async function processWebhook(provider: PaymentProvider, req: WebhookRequ
   if (!updated) return { result: "already_settled", paymentId: payment.id };
   await store.applyToTarget(payment, status);
   return { result: "processed", paymentId: payment.id, status };
+}
+
+const TRANSFER_REF_RE = /^(po|rf)-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+async function processTransferEvent(provider: string, event: NormalizedEvent, store: WebhookStore): Promise<WebhookOutcome> {
+  const ref = event.reference && TRANSFER_REF_RE.test(event.reference) ? event.reference : null;
+  const isNew = await store.recordEvent(provider, event.eventId, null, event.raw);
+  if (!isNew) return { result: "duplicate" };
+  if (!ref || !store.settleTransfer) return { result: "unknown_payment" };
+  if (event.status === "ignored") return { result: "ignored" };
+  const reason = event.status === "failed" ? "provider_reported_failure" : null;
+  const ok = await store.settleTransfer(ref, event.status, event.providerRef, reason);
+  return ok ? { result: "transfer_processed", reference: ref, status: event.status } : { result: "unknown_payment" };
 }
