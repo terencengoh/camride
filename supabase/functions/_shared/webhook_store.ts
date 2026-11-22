@@ -42,5 +42,16 @@ export function supabaseWebhookStore(db: SupabaseClient): WebhookStore {
         }
       }
     },
+    async settleTransfer(reference, status, providerRef, reason) {
+      const [kind, id] = [reference.slice(0, 2), reference.slice(3)];
+      const { error } = kind === "po"
+        ? await db.rpc("payout_set_result", { p_payout_id: id, p_status: status === "successful" ? "paid" : "failed", p_provider_ref: providerRef, p_reason: reason })
+        : await db.rpc("refund_set_result", { p_refund_id: id, p_status: status === "successful" ? "succeeded" : "failed", p_provider_ref: providerRef, p_reason: reason });
+      if (error) {
+        if (/not found/i.test(error.message)) return false;
+        throw error;
+      }
+      return true;
+    },
   };
 }

@@ -1,18 +1,23 @@
-// POST /functions/v1/match-driver  { trip_id } | { order_id }
-// (Re)offers a trip or delivery to the nearest available driver/courier.
-// Allowed callers: the trip's rider, the order's customer or restaurant owner, or the service role (cron).
-import { handler, HttpError, json, readJson, requireEnv } from "../_shared/http.ts";
-import { adminClient, requireUser } from "../_shared/supabase.ts";
+// POST /functions/v1/match-driver  { trip_id } | { order_id } | { run: true }
+// (Re)offers a trip or delivery to the nearest available driver/courier (SQL offer_trip / offer_order).
+// { run: true } runs one scheduler pass (public.run_matching) - normally pg_cron does this every 10 s.
+// Allowed callers: the trip's rider, the order's customer or restaurant owner, or the service role.
+import { handler, HttpError, json, readJson } from "../_shared/http.ts";
+import { adminClient, isServiceRequest, requireUser } from "../_shared/supabase.ts";
 import { offerOrder, offerTrip } from "../_shared/matching.ts";
 
 Deno.serve(handler(async (req) => {
   if (req.method !== "POST") throw new HttpError(405, "POST only");
   const db = adminClient();
-  const body = await readJson<{ trip_id?: string; order_id?: string }>(req);
+  const body = await readJson<{ trip_id?: string; order_id?: string; run?: boolean }>(req);
+  const isService = isServiceRequest(req);
+  if (body.run) {
+    if (!isService) throw new HttpError(403, "service role only");
+    const { data, error } = await db.rpc("run_matching");
+    if (error) throw new HttpError(500, error.message);
+    return json(data);
+  }
   if (!body.trip_id === !body.order_id) throw new HttpError(422, "send exactly one of trip_id or order_id");
-
-  const bearer = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "");
-  const isService = bearer === requireEnv("SUPABASE_SERVICE_ROLE_KEY");
   if (!isService) {
     const user = await requireUser(req, db);
     if (body.trip_id) {
