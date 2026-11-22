@@ -1,9 +1,10 @@
 // POST /functions/v1/payments-initiate  { trip_id | order_id, method: "mtn" | "orange", phone }
 // Charges the amount stored in the database (never a client amount) via the configured provider.
 // The customer approves on their own phone; the final status arrives through payments-webhook
-// and reaches the app through Realtime on the payments row.
+// and reaches the app through Realtime on the payments row. With CinetPay (hosted checkout) the
+// response carries checkout_url, which the app opens in the browser.
 import { handler, HttpError, json, readJson } from "../_shared/http.ts";
-import { adminClient, requireUser } from "../_shared/supabase.ts";
+import { adminClient, requireActiveUser } from "../_shared/supabase.ts";
 import { detectOperator, normalizeCmPhone } from "../_shared/phone.ts";
 import { getProvider, ProviderError } from "../_shared/payments/index.ts";
 
@@ -12,7 +13,7 @@ interface Body { trip_id?: string; order_id?: string; method: "mtn" | "orange"; 
 Deno.serve(handler(async (req) => {
   if (req.method !== "POST") throw new HttpError(405, "POST only");
   const db = adminClient();
-  const user = await requireUser(req, db);
+  const user = await requireActiveUser(req, db);
   const body = await readJson<Body>(req);
   if (!body.trip_id === !body.order_id) throw new HttpError(422, "send exactly one of trip_id or order_id");
   if (body.method !== "mtn" && body.method !== "orange") throw new HttpError(422, "method must be mtn or orange");
@@ -25,10 +26,10 @@ Deno.serve(handler(async (req) => {
   let amount: number;
   let description: string;
   if (body.trip_id) {
-    const { data: t } = await db.from("trips").select("id,rider_id,fare_xaf,status,payment_status").eq("id", body.trip_id).single();
+    const { data: t } = await db.from("trips").select("id,rider_id,amount_due_xaf,status,payment_status").eq("id", body.trip_id).single();
     if (!t || t.rider_id !== user.id) throw new HttpError(404, "trip not found");
-    if (t.status === "cancelled" || t.payment_status === "paid") throw new HttpError(409, "nothing to pay");
-    amount = t.fare_xaf;
+    if (["cancelled", "no_drivers"].includes(t.status) || t.payment_status === "paid") throw new HttpError(409, "nothing to pay");
+    amount = t.amount_due_xaf;
     description = `CamRide trip ${t.id.slice(0, 8)}`;
   } else {
     const { data: o } = await db.from("orders").select("id,customer_id,total_xaf,status,payment_status").eq("id", body.order_id!).single();
@@ -57,6 +58,7 @@ Deno.serve(handler(async (req) => {
     await db.from(body.trip_id ? "trips" : "orders").update({ payment_status: "pending" }).eq("id", target.id).neq("payment_status", "paid");
     return json({
       payment_id: payment.id, status: res.status,
+      checkout_url: res.checkoutUrl ?? null,
       ussd_code: res.ussdCode ?? (body.method === "mtn" ? "*126#" : "#150*50#"),
     }, 201);
   } catch (e) {

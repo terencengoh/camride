@@ -1,4 +1,5 @@
-// /functions/v1/payments-webhook?provider=campay|notchpay
+// /functions/v1/payments-webhook?provider=campay|notchpay|cinetpay
+// Handles customer payments and the results of payouts/refunds (transfer events).
 // Public endpoint (verify_jwt = false in config.toml): authenticity comes from the provider signature.
 // Always answers 200 for authentic events (including duplicates) so providers stop retrying;
 // 401 for bad signatures.
@@ -12,6 +13,8 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   const name = new URL(req.url).searchParams.get("provider") ?? "";
   if (!PROVIDERS.includes(name as never)) return json({ error: "unknown provider" }, 400);
+  // CinetPay checks that notify_url answers before sending notifications.
+  if (name === "cinetpay" && req.method === "GET") return new Response("ok", { status: 200, headers: corsHeaders });
   try {
     const provider = getProvider(name);
     const rawBody = req.method === "GET" ? "" : await req.text();
