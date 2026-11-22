@@ -8,6 +8,13 @@
 //   Header x-notch-signature = hex(HMAC-SHA256(raw body, webhook hash key)); verify against the RAW body.
 //   Event: { id, type: "payment.complete" | "payment.failed" | "payment.canceled" | "payment.expired" | ..., data: { id, reference, amount, status } }
 //   (https://developer.notchpay.co/api-reference/webhooks)
+// Transfers (payouts/refunds): https://developer.notchpay.co/api-reference/transfers
+//   POST https://api.notchpay.co/transfers   Authorization: <public key>, X-Grant: <private key>
+//        { amount, currency: "XAF", beneficiary_data: { name, phone }, channel: "cm.mtn" | "cm.orange", description, reference }
+//        -> { transfer: { id, reference, status: pending | processing | complete | failed | canceled } }
+//   GET  https://api.notchpay.co/transfers/{reference}  -> { transfer: { ... status } }
+//   Webhook events transfer.complete / transfer.failed. Transfers only work from IP addresses whitelisted in
+//   the Notch Pay dashboard -> Supabase Edge Functions (no fixed IP) need a static-IP egress proxy for payouts.
 import { hmacSha256Hex, timingSafeEqual } from "../crypto.ts";
 import {
   type FetchFn,
@@ -15,6 +22,8 @@ import {
   type InitiateResult,
   type NormalizedEvent,
   type PaymentProvider,
+  type PayoutInput,
+  type PayoutResult,
   ProviderError,
   type WebhookRequest,
   WebhookVerificationError,
@@ -24,6 +33,8 @@ export interface NotchPayConfig {
   baseUrl: string; // https://api.notchpay.co
   publicKey: string;
   webhookHashKey: string;
+  /** Private key, sent as X-Grant; only needed for transfers. */
+  privateKey?: string;
 }
 
 const CHANNEL = { mtn: "cm.mtn", orange: "cm.orange" } as const;
@@ -74,6 +85,19 @@ export class NotchPayProvider implements PaymentProvider {
     }
     const data = evt.data ?? {};
     const type = String(evt.type ?? evt["event" as keyof typeof evt] ?? "");
+    if (type.startsWith("transfer.")) {
+      const ref = (data.reference ?? data.merchant_reference) as string | undefined;
+      return {
+        kind: "transfer",
+        reference: ref ?? null,
+        eventId: String(evt.id ?? `${ref}:${type}`),
+        paymentId: null,
+        providerRef: (data.id as string | undefined) ?? ref ?? null,
+        status: type === "transfer.complete" ? "successful" : ["transfer.failed", "transfer.canceled"].includes(type) ? "failed" : "ignored",
+        amountXaf: data.amount != null ? Math.round(Number(data.amount)) : null,
+        raw: evt,
+      };
+    }
     const status = type === "payment.complete" ? "successful"
       : ["payment.failed", "payment.canceled", "payment.expired"].includes(type) ? "failed"
       : "ignored";
@@ -88,4 +112,44 @@ export class NotchPayProvider implements PaymentProvider {
       raw: evt,
     };
   }
+
+  private transferHeaders(): Record<string, string> {
+    if (!this.cfg.privateKey) throw new ProviderError("NOTCHPAY_PRIVATE_KEY is required for transfers", null, true);
+    return { Authorization: this.cfg.publicKey, "X-Grant": this.cfg.privateKey, "Content-Type": "application/json", Accept: "application/json" };
+  }
+
+  async payout(input: PayoutInput): Promise<PayoutResult> {
+    const headers = this.transferHeaders();
+    const res = await this.fetchFn(`${this.cfg.baseUrl}/transfers`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        amount: input.amountXaf,
+        currency: "XAF",
+        beneficiary_data: { name: input.name.slice(0, 80) || "CamRide", phone: `+${input.phone}` },
+        channel: CHANNEL[input.method],
+        description: input.description.slice(0, 100),
+        reference: input.reference,
+      }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new ProviderError(`Notch Pay transfer failed (${res.status})`, body, res.status >= 400 && res.status < 500 && res.status !== 409);
+    const t = body?.transfer ?? body;
+    return { providerRef: t?.id ? String(t.id) : null, ...mapTransfer(t?.status), raw: body };
+  }
+
+  async payoutStatus(reference: string, _providerRef: string | null): Promise<PayoutResult> {
+    const res = await this.fetchFn(`${this.cfg.baseUrl}/transfers/${encodeURIComponent(reference)}`, { headers: this.transferHeaders() });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new ProviderError(`Notch Pay transfer status failed (${res.status})`, body);
+    const t = body?.transfer ?? body;
+    return { providerRef: t?.id ? String(t.id) : null, ...mapTransfer(t?.status), raw: body };
+  }
+}
+
+function mapTransfer(s: unknown): { status: PayoutResult["status"]; failureReason?: string } {
+  const v = String(s ?? "pending").toLowerCase();
+  if (v === "complete" || v === "completed") return { status: "successful" };
+  if (v === "failed" || v === "canceled" || v === "cancelled") return { status: "failed", failureReason: `notchpay_${v}` };
+  return { status: "pending" };
 }
