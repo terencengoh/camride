@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="112" fill="#007a3d"/>
+  <rect x="171" width="170" height="512" fill="#ce1126"/>
+  <rect x="341" width="171" height="512" fill="#fcd116"/>
+  <rect width="512" height="512" rx="112" fill="none"/>
+  <polygon points="256,150 281,228 363,228 297,276 322,354 256,306 190,354 215,276 149,228 231,228" fill="#fcd116" stroke="#7a5c00" stroke-width="6"/>
+  <text x="256" y="452" font-family="Arial, Helvetica, sans-serif" font-weight="700" font-size="84" text-anchor="middle" fill="#ffffff" stroke="#0b2a17" stroke-width="4" paint-order="stroke">CamRide</text>
+</svg>
