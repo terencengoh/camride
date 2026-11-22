@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths: ["mobile/**", "supabase/**", ".github/workflows/ci.yml"]
+  pull_request:
+    paths: ["mobile/**", "supabase/**", ".github/workflows/ci.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mobile:
+    name: Mobile (typecheck + lint)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npx tsc --noEmit
+      - run: npx expo lint
+      - run: npx expo-doctor
+
+  functions:
+    name: Edge Functions (check + lint + test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: supabase/functions
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - run: deno check */index.ts tests/*.ts
+      - run: deno lint
+      - run: deno test --allow-read tests/
+
+  database:
+    name: Database (migrations + seed + RPC tests on PGlite/PostGIS)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: supabase/tests/db
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: supabase/tests/db/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm test
