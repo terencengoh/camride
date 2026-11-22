@@ -44,6 +44,11 @@ export default function ActivityScreen() {
               <Text style={{ fontWeight: "800" }}>{fcfa(it.kind === "trip" ? it.row.fare_xaf : it.row.total_xaf, lang)}</Text>
             </Row>
             <Muted>{`${shortDate(it.row.created_at, lang)} · ${it.kind === "trip" ? t(`st_${it.row.status}`) : t(`os_${it.row.status}`)}`}</Muted>
+            {it.row.status === "completed" || it.row.status === "delivered" ? (
+              <Pressable accessibilityRole="link" onPress={() => router.push(`/receipt/${it.row.id}?kind=${it.kind}`)}>
+                <Text style={{ color: "#007a3d", fontWeight: "700", marginTop: 4 }}>{`🧾 ${t("receipt")}`}</Text>
+              </Pressable>
+            ) : null}
           </Card>
         </Pressable>
       ))}

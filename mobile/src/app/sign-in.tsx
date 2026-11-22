@@ -2,8 +2,8 @@
 // Requires an SMS provider configured in the Supabase project (see docs/ARCHITECTURE.md).
 import { router } from "expo-router";
 import { useState } from "react";
-import { Text } from "react-native";
-import { Button, Field, H1, Muted, Screen } from "../components/ui";
+import { Pressable, Text } from "react-native";
+import { Button, Field, H1, Muted, Row, Screen } from "../components/ui";
 import { isConfigured } from "../lib/env";
 import { useI18n } from "../lib/i18n";
 import { normalizeCmPhone, toE164 } from "../lib/phone";
@@ -17,11 +17,13 @@ export default function SignIn() {
   const [sentTo, setSentTo] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [accepted, setAccepted] = useState(false);
 
   const send = async () => {
     setErr(null);
     const n = normalizeCmPhone(phone);
     if (!n) return setErr(t("badPhone"));
+    if (!accepted) return setErr(t("mustAcceptTerms"));
     setBusy(true);
     const { error } = await supabase.auth.signInWithOtp({ phone: toE164(n) });
     setBusy(false);
@@ -33,7 +35,11 @@ export default function SignIn() {
     if (!sentTo) return;
     setErr(null);
     setBusy(true);
-    const { error } = await supabase.auth.verifyOtp({ phone: sentTo, token: code.trim(), type: "sms" });
+    const { data, error } = await supabase.auth.verifyOtp({ phone: sentTo, token: code.trim(), type: "sms" });
+    if (!error && data.user) {
+      // Record consent (Law No. 2024/017) on the profile.
+      await supabase.from("profiles").update({ accepted_terms_at: new Date().toISOString() }).eq("id", data.user.id);
+    }
     setBusy(false);
     if (error) return setErr(t("error", { msg: error.message }));
     router.replace("/");
@@ -48,7 +54,17 @@ export default function SignIn() {
       {!sentTo ? (
         <>
           <Field label={t("phone")} placeholder="+237 6XX XXX XXX" keyboardType="phone-pad" autoComplete="tel" value={phone} onChangeText={setPhone} />
-          <Button title={t("sendCode")} onPress={send} loading={busy} />
+          <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: accepted }} onPress={() => setAccepted(!accepted)}>
+            <Row style={{ alignItems: "flex-start" }}>
+              <Text style={{ fontSize: 22, color: colors.green }}>{accepted ? "☑" : "☐"}</Text>
+              <Text style={{ flex: 1, color: colors.ink }}>{t("acceptTerms")}</Text>
+            </Row>
+          </Pressable>
+          <Row>
+            <Button title={t("terms")} variant="secondary" onPress={() => router.push("/legal/terms")} />
+            <Button title={t("privacy")} variant="secondary" onPress={() => router.push("/legal/privacy")} />
+          </Row>
+          <Button title={t("sendCode")} onPress={send} loading={busy} disabled={!accepted} />
         </>
       ) : (
         <>

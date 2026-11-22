@@ -1,19 +1,21 @@
 // Book a ride: live map with the device location, destination by tap or search,
-// server-side fare quotes for Moto / Car / Comfort, payment method, request.
+// server-side fare quotes for Moto / Car / Comfort (road route drawn on the map), promo code,
+// payment method, request.
 import { router } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import { Text, TextInput, View } from "react-native";
-import MapView, { Marker, type Region } from "react-native-maps";
+import MapView, { Marker, Polyline, type Region } from "react-native-maps";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { CityPicker } from "../../components/CityPicker";
 import { Button, Chip, Muted, Row, styles as ui } from "../../components/ui";
-import { api } from "../../lib/api";
+import { api, type QuoteResult } from "../../lib/api";
 import { fcfa, km } from "../../lib/format";
 import { useI18n } from "../../lib/i18n";
 import { geocode, locate } from "../../lib/location";
 import { DEFAULT_PLACE, nearestPlace, type Place } from "../../lib/places";
+import { toCoords } from "../../lib/polyline";
 import { colors } from "../../lib/theme";
-import type { LatLng, PayMethod, Quote, VehicleType } from "../../lib/types";
+import type { LatLng, PayMethod, VehicleType } from "../../lib/types";
 
 const ICON: Record<VehicleType, string> = { moto: "🏍️", car: "🚗", comfort: "🚙" };
 const region = (p: LatLng, d = 0.03): Region => ({ latitude: p.lat, longitude: p.lng, latitudeDelta: d, longitudeDelta: d });
@@ -26,7 +28,9 @@ export default function RideScreen() {
   const [dropoff, setDropoff] = useState<LatLng | null>(null);
   const [query, setQuery] = useState("");
   // Quotes are keyed by the route they were fetched for, so a stale quote is never shown.
-  const [quoteState, setQuoteState] = useState<{ key: string; quotes: Quote[] } | null>(null);
+  const [quoteState, setQuoteState] = useState<{ key: string; result: QuoteResult } | null>(null);
+  const [promoInput, setPromoInput] = useState("");
+  const [promo, setPromo] = useState("");
   const [vehicle, setVehicle] = useState<VehicleType>("moto");
   const [pay, setPay] = useState<PayMethod>("mtn");
   const [note, setNote] = useState<string | null>(null);
@@ -42,17 +46,20 @@ export default function RideScreen() {
     });
   }, [t]);
 
-  const routeKey = dropoff ? `${pickup.lat},${pickup.lng}>${dropoff.lat},${dropoff.lng}` : null;
-  const quotes = quoteState && quoteState.key === routeKey ? quoteState.quotes : null;
+  const routeKey = dropoff ? `${pickup.lat},${pickup.lng}>${dropoff.lat},${dropoff.lng}|${promo}` : null;
+  const result = quoteState && quoteState.key === routeKey ? quoteState.result : null;
+  const quotes = result?.quotes ?? null;
+  const discounts = result?.promo && "discounts" in result.promo ? result.promo.discounts : null;
+  const promoError = result?.promo && "error" in result.promo ? result.promo.error : null;
 
   useEffect(() => {
     if (!dropoff || !routeKey) return;
     let active = true;
-    api.quote(pickup, dropoff).then((q) => active && setQuoteState({ key: routeKey, quotes: q })).catch((e) => active && setNote(t("error", { msg: e.message })));
+    api.quote(pickup, dropoff, promo).then((r) => active && setQuoteState({ key: routeKey, result: r })).catch((e) => active && setNote(t("error", { msg: e.message })));
     return () => {
       active = false;
     };
-  }, [pickup, dropoff, routeKey, t]);
+  }, [pickup, dropoff, routeKey, promo, t]);
 
   const chooseCity = (p: Place) => {
     setCity(p);
@@ -73,7 +80,7 @@ export default function RideScreen() {
     if (!dropoff) return;
     setBusy(true);
     try {
-      const { trip } = await api.requestRide({ ...pickup }, { ...dropoff, address: query || undefined }, vehicle, pay);
+      const { trip } = await api.requestRide({ ...pickup }, { ...dropoff, address: query || undefined }, vehicle, pay, discounts ? promo : undefined);
       router.push(`/trip/${trip.id}`);
     } catch (e) {
       setNote(t("error", { msg: (e as Error).message }));
@@ -83,6 +90,8 @@ export default function RideScreen() {
   };
 
   const selected = quotes?.find((q) => q.vehicle_type === vehicle);
+  const price = (fare: number, type: VehicleType) => fare - (discounts?.[type] ?? 0);
+  const routeCoords = toCoords(result?.route.polyline);
 
   return (
     <View style={{ flex: 1 }}>
@@ -101,6 +110,9 @@ export default function RideScreen() {
           onDragEnd={(e) => setPickup({ lat: e.nativeEvent.coordinate.latitude, lng: e.nativeEvent.coordinate.longitude })}
         />
         {dropoff ? <Marker coordinate={{ latitude: dropoff.lat, longitude: dropoff.lng }} pinColor={colors.red} title={t("destination")} /> : null}
+        {routeCoords.length > 1 ? (
+          <Polyline coordinates={routeCoords} strokeColor={colors.green} strokeWidth={5} lineDashPattern={result?.route.source === "estimate" ? [8, 8] : undefined} />
+        ) : null}
       </MapView>
       <SafeAreaView edges={["top"]} style={{ position: "absolute", top: 0, left: 0, right: 0, paddingHorizontal: 10 }}>
         <CityPicker value={city.id} onChange={chooseCity} />
@@ -121,9 +133,16 @@ export default function RideScreen() {
                 key={q.vehicle_type}
                 selected={q.vehicle_type === vehicle}
                 onPress={() => setVehicle(q.vehicle_type)}
-                label={`${ICON[q.vehicle_type]}  ${t(q.vehicle_type)}   ${fcfa(q.fare_xaf, lang)}   ·   ${km(q.distance_km, lang)} · ${Math.round(q.duration_min)} min`}
+                label={`${ICON[q.vehicle_type]}  ${t(q.vehicle_type)}   ${fcfa(price(q.fare_xaf, q.vehicle_type), lang)}   ·   ${km(q.distance_km, lang)} · ${Math.round(q.duration_min)} min`}
               />
             ))}
+            {result?.route.source === "estimate" ? <Muted>{t("routeEstimate")}</Muted> : null}
+            <Row>
+              <TextInput style={[ui.input, { flex: 1 }]} placeholder={t("promoCode")} autoCapitalize="characters" value={promoInput} onChangeText={setPromoInput} />
+              <Chip label={t("apply")} onPress={() => setPromo(promoInput.trim().toUpperCase())} />
+            </Row>
+            {discounts && selected ? <Muted>{t("promoApplied", { code: promo, amount: fcfa(discounts[vehicle] ?? 0, lang) })}</Muted> : null}
+            {promoError ? <Text style={{ color: colors.red }}>{promoError}</Text> : null}
             {vehicle === "moto" ? <Muted>{t("motoNote")}</Muted> : null}
             <Row>
               <Text style={{ fontWeight: "600" }}>{t("payWith")}</Text>
@@ -131,7 +150,7 @@ export default function RideScreen() {
               <Chip label="Orange" accent={colors.orange} selected={pay === "orange"} onPress={() => setPay("orange")} />
               <Chip label={t("cash")} selected={pay === "cash"} onPress={() => setPay("cash")} />
             </Row>
-            <Button title={`${t("request")} ${t(vehicle)}${selected ? " · " + fcfa(selected.fare_xaf, lang) : ""}`} onPress={request} loading={busy} />
+            <Button title={`${t("request")} ${t(vehicle)}${selected ? " · " + fcfa(price(selected.fare_xaf, vehicle), lang) : ""}`} onPress={request} loading={busy} />
           </>
         ) : null}
       </View>
