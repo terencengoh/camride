@@ -1,0 +1,18 @@
+{
+  "rate_cards": {
+    "moto": { "base_xaf": 150, "per_km_xaf": 100, "per_min_xaf": 10, "minimum_xaf": 300 },
+    "car": { "base_xaf": 500, "per_km_xaf": 250, "per_min_xaf": 20, "minimum_xaf": 1000 },
+    "comfort": { "base_xaf": 1000, "per_km_xaf": 400, "per_min_xaf": 30, "minimum_xaf": 2000 },
+    "delivery": { "base_xaf": 300, "per_km_xaf": 150, "per_min_xaf": 0, "minimum_xaf": 500 }
+  },
+  "cases": [
+    { "key": "moto", "distance_km": 10.6, "duration_min": 11.6, "expected": 1350 },
+    { "key": "moto", "distance_km": 0.5, "duration_min": 2, "expected": 300 },
+    { "key": "car", "distance_km": 10.6, "duration_min": 11.6, "expected": 3400 },
+    { "key": "comfort", "distance_km": 10.6, "duration_min": 11.6, "expected": 5600 },
+    { "key": "car", "distance_km": 1, "duration_min": 2, "expected": 1000 },
+    { "key": "delivery", "distance_km": 3.25, "duration_min": 0, "expected": 800 },
+    { "key": "car", "distance_km": 4.1, "duration_min": 0, "expected": 1550 },
+    { "key": "comfort", "distance_km": 0, "duration_min": 0, "expected": 2000 }
+  ]
+}
