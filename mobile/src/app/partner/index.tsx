@@ -16,7 +16,7 @@ import { supabase } from "../../lib/supabase";
 import { colors } from "../../lib/theme";
 import type { MenuItem, Order } from "../../lib/types";
 
-interface MyRestaurant { id: string; name: string; is_open: boolean; city_id: string }
+interface MyRestaurant { id: string; name: string; is_open: boolean; city_id: string; active: boolean; rating_avg: number; rating_count: number }
 
 const OPEN_ORDERS = ["placed", "accepted", "preparing", "ready", "picked_up"] as const;
 
@@ -36,7 +36,7 @@ export default function PartnerScreen() {
 
   const fetchAll = useCallback(async (): Promise<{ rest: MyRestaurant | null; menu: MenuItem[] }> => {
     if (!uid) return { rest: null, menu: [] };
-    const { data } = await supabase.from("restaurants").select("id,name,is_open,city_id").eq("owner_id", uid).maybeSingle();
+    const { data } = await supabase.from("restaurants").select("id,name,is_open,city_id,active,rating_avg,rating_count").eq("owner_id", uid).maybeSingle();
     if (!data) return { rest: null, menu: [] };
     const { data: m } = await supabase.from("menu_items").select("*").eq("restaurant_id", data.id).order("name");
     return { rest: data as MyRestaurant, menu: (m ?? []) as MenuItem[] };
@@ -114,6 +114,11 @@ export default function PartnerScreen() {
   return (
     <Screen>
       <H1>{rest.name}</H1>
+      <Muted>{`⭐ ${Number(rest.rating_avg).toFixed(1)} (${rest.rating_count})${rest.active ? "" : " · suspended"}`}</Muted>
+      <Row>
+        <Button title={t("earnings")} variant="secondary" onPress={() => router.push("/partner/earnings")} />
+        <Button title={t("support")} variant="secondary" onPress={() => router.push("/support")} />
+      </Row>
       <Row>
         <Text style={{ flex: 1, fontWeight: "700" }}>{rest.is_open ? t("open") : t("closed")}</Text>
         <Switch value={rest.is_open} onValueChange={setOpen} />
