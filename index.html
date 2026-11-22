@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>CamRide: rides, motos and food delivery in Cameroon (demo)</title>
+<meta name="description" content="CamRide demo prototype: car and moto (benskin) rides plus food delivery across all ten regions of Cameroon, with simulated MTN MoMo and Orange Money checkout.">
+<meta name="theme-color" content="#007a3d">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta property="og:title" content="CamRide (demo prototype)">
+<meta property="og:description" content="Rides, motos and food delivery for Cameroon, paid with mobile money. Demo mode: no real money moves.">
+<meta property="og:image" content="icon-512.png">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="flagbar" aria-hidden="true"><span></span><span></span><span></span></div>
+<header class="topbar">
+  <div class="brand"><img src="icon.svg" alt="" width="32" height="32"><span>Cam<b>Ride</b></span><em class="demo-pill" data-i18n="demoPill">DEMO</em></div>
+  <div class="top-actions">
+    <label class="sr" for="citySel" data-i18n="cityLabel">Region / city</label>
+    <select id="citySel" aria-label="Region / city"></select>
+    <button id="langBtn" class="lang" type="button" aria-label="Changer de langue / Switch language">FR</button>
+  </div>
+</header>
+
+<main id="main">
+  <!-- MAP VIEW (ride + live tracking) -->
+  <section id="view-ride" class="view active" aria-label="Ride">
+    <div id="map" role="application" aria-label="Map"></div>
+    <button id="locateBtn" class="fab" type="button" title="My location" aria-label="My location">◎</button>
+    <div id="sheet" class="sheet"></div>
+  </section>
+
+  <!-- FOOD -->
+  <section id="view-food" class="view panel" aria-label="Food">
+    <div id="foodBody"></div>
+    <div id="cartBar" class="cartbar hidden"></div>
+  </section>
+
+  <!-- ACTIVITY -->
+  <section id="view-activity" class="view panel" aria-label="Activity">
+    <h2 data-i18n="activityTitle">Your activity</h2>
+    <p class="muted" data-i18n="activityNote">Trips and orders you make in this demo are saved only in this browser.</p>
+    <div id="activityList"></div>
+  </section>
+
+  <!-- JOIN -->
+  <section id="view-join" class="view panel" aria-label="Join">
+    <h2 data-i18n="joinTitle">Join CamRide</h2>
+    <p class="muted" data-i18n="joinNote">Demo form. Nothing is sent anywhere: your answers stay in this browser (localStorage).</p>
+    <form id="joinForm" class="card form" novalidate>
+      <label><span data-i18n="fRole">I want to</span>
+        <select name="role" required>
+          <option value="rider" data-i18n="roleRider">Ride / order food</option>
+          <option value="car" data-i18n="roleCar">Drive a car (VTC)</option>
+          <option value="moto" data-i18n="roleMoto">Ride a moto-taxi (benskin)</option>
+          <option value="courier" data-i18n="roleCourier">Deliver food (courier)</option>
+          <option value="restaurant" data-i18n="roleResto">List my restaurant</option>
+        </select></label>
+      <label><span data-i18n="fName">Full name</span><input name="name" required autocomplete="name"></label>
+      <label><span data-i18n="fPhone">Phone (+237)</span>
+        <div class="phone"><b>+237</b><input name="phone" inputmode="tel" placeholder="6XX XXX XXX" required></div></label>
+      <label><span data-i18n="fCity">City</span><select name="city" id="joinCity"></select></label>
+      <div class="vehicle-only">
+        <label><span data-i18n="fPlate">Plate number</span><input name="plate" placeholder="LT 123 AB"></label>
+        <label class="check"><input type="checkbox" name="docs"> <span data-i18n="fDocs">I have a valid licence, carte grise, insurance and technical inspection</span></label>
+      </div>
+      <p class="err" id="joinErr" role="alert"></p>
+      <button class="btn primary" type="submit" data-i18n="fSubmit">Save sign-up (demo)</button>
+    </form>
+    <h3 data-i18n="mySignups">Sign-ups saved in this browser</h3>
+    <div id="signupList"></div>
+  </section>
+
+  <!-- ADMIN -->
+  <section id="view-admin" class="view panel" aria-label="Dashboard">
+    <h2 data-i18n="adminTitle">Operator dashboard</h2>
+    <p class="muted" data-i18n="adminNote">Built only from the demo trips, orders and sign-ups in this browser. No real data.</p>
+    <div id="adminBody"></div>
+  </section>
+</main>
+
+<nav class="tabs" aria-label="Main">
+  <button data-tab="ride" class="active" type="button"><i>🚗</i><span data-i18n="tabRide">Ride</span></button>
+  <button data-tab="food" type="button"><i>🍲</i><span data-i18n="tabFood">Food</span></button>
+  <button data-tab="activity" type="button"><i>🧾</i><span data-i18n="tabActivity">Activity</span></button>
+  <button data-tab="join" type="button"><i>🪪</i><span data-i18n="tabJoin">Join</span></button>
+  <button data-tab="admin" type="button"><i>📊</i><span data-i18n="tabAdmin">Dashboard</span></button>
+</nav>
+
+<footer class="foot"><span data-i18n="footer">Demo prototype. Payments are simulated: no real money moves. Drivers, restaurants and dishes are fictional.</span> · Map © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> · <a href="GO-LIVE.md" data-i18n="goLive">Go-live notes</a></footer>
+
+<div id="modal" class="modal hidden" role="dialog" aria-modal="true"><div class="modal-card" id="modalCard"></div></div>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
