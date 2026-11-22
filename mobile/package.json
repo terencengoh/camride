@@ -8,12 +8,19 @@
     "eslint-config-expo": "~58.0.4",
     "expo": "~58.0.26",
     "expo-constants": "~58.0.16",
+    "expo-dev-client": "~58.0.21",
+    "expo-device": "~58.0.5",
+    "expo-image-picker": "~58.0.10",
     "expo-linking": "~58.0.17",
     "expo-localization": "~58.0.5",
     "expo-location": "~58.0.22",
+    "expo-notifications": "~58.1.9",
     "expo-router": "~58.0.32",
     "expo-secure-store": "~58.0.3",
+    "expo-splash-screen": "~58.0.14",
     "expo-status-bar": "~58.0.5",
+    "expo-task-manager": "~58.0.14",
+    "expo-web-browser": "~58.1.0",
     "react": "19.3.0",
     "react-native": "0.88.1",
     "react-native-maps": "1.29.11",
@@ -32,7 +39,9 @@
     "ios": "expo start --ios",
     "typecheck": "tsc --noEmit",
     "lint": "expo lint",
-    "build:android": "eas build -p android --profile preview"
+    "build:android": "eas build -p android --profile preview",
+    "postinstall": "node scripts/decode-assets.js",
+    "assets": "node scripts/decode-assets.js"
   },
   "private": true
 }
