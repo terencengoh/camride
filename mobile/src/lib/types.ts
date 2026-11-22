@@ -30,9 +30,16 @@ export interface Trip {
   distance_km: number;
   duration_min: number;
   fare_xaf: number;
+  discount_xaf: number;
+  amount_due_xaf: number;
+  promo_code: string | null;
+  route_polyline: string | null;
+  route_source: "osrm" | "estimate" | null;
+  share_token: string;
   payment_method: PayMethod;
   payment_status: "unpaid" | "pending" | "paid" | "failed";
   created_at: string;
+  completed_at?: string | null;
 }
 
 export interface Order {
@@ -49,6 +56,8 @@ export interface Order {
   subtotal_xaf: number;
   delivery_fee_xaf: number;
   total_xaf: number;
+  discount_xaf: number;
+  promo_code: string | null;
   payment_method: PayMethod;
   payment_status: "unpaid" | "pending" | "paid" | "failed";
   created_at: string;
@@ -100,4 +109,47 @@ export interface MenuItem {
 export interface LatLng {
   lat: number;
   lng: number;
+}
+
+export interface RouteInfo {
+  polyline: string;
+  source: "osrm" | "estimate";
+}
+
+export interface Wallet {
+  account_id: string;
+  kind: "driver_wallet" | "restaurant_wallet";
+  restaurant_id: string | null;
+  label: string;
+  balance_xaf: number;
+  pending_payout_xaf: number;
+}
+
+export interface LedgerLine {
+  entry_id: number;
+  created_at: string;
+  kind: string;
+  memo: string | null;
+  amount_xaf: number;
+  trip_id: string | null;
+  order_id: string | null;
+}
+
+export interface PayoutRequest {
+  id: string;
+  amount_xaf: number;
+  phone: string;
+  method: "mtn" | "orange";
+  status: "requested" | "approved" | "processing" | "paid" | "failed" | "rejected";
+  review_note: string | null;
+  created_at: string;
+}
+
+export type DocType = "id_card" | "driving_licence" | "vehicle_registration" | "insurance" | "profile_photo";
+
+export interface DocStatus {
+  doc_type: DocType;
+  required: boolean;
+  status: "missing" | "pending" | "approved" | "rejected";
+  reviewer_note: string | null;
 }

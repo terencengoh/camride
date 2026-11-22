@@ -1,6 +1,7 @@
 // Mobile money checkout: choose MTN / Orange, enter the number, the provider pushes a prompt to the
 // customer's phone, and the final status arrives through Realtime on the payments row.
 import { useEffect, useState } from "react";
+import * as WebBrowser from "expo-web-browser";
 import { Modal, Text, View } from "react-native";
 import { api } from "../lib/api";
 import { fcfa } from "../lib/format";
@@ -29,6 +30,7 @@ export function PayModal({ visible, target, amount, defaultMethod = "mtn", onClo
   const [busy, setBusy] = useState(false);
   const [paymentId, setPaymentId] = useState<string | null>(null);
   const [ussd, setUssd] = useState<string>("");
+  const [checkout, setCheckout] = useState(false);
   const { row: payment } = useRealtimeRow<{ id: string; status: string }>("payments", paymentId, "id,status");
 
   const failed = payment?.status === "failed";
@@ -50,6 +52,11 @@ export function PayModal({ visible, target, amount, defaultMethod = "mtn", onClo
       const res = await api.pay(target, method, n);
       setPaymentId(res.payment_id);
       setUssd(res.ussd_code ?? (method === "mtn" ? "*126#" : "#150*50#"));
+      // CinetPay: hosted checkout page; the result still arrives through the webhook + Realtime.
+      if (res.checkout_url) {
+        setCheckout(true);
+        await WebBrowser.openBrowserAsync(res.checkout_url);
+      }
     } catch (e) {
       setErr(t("error", { msg: (e as Error).message }));
     } finally {
@@ -65,7 +72,7 @@ export function PayModal({ visible, target, amount, defaultMethod = "mtn", onClo
           <Text style={{ fontSize: 26, fontWeight: "800", color: colors.green }}>{fcfa(amount, lang)}</Text>
           {waiting ? (
             <>
-              <Muted>{t("approveOnPhone", { ussd })}</Muted>
+              <Muted>{checkout ? t("openCheckout") : t("approveOnPhone", { ussd })}</Muted>
               <Button title={t("cancel")} variant="secondary" onPress={onClose} />
             </>
           ) : (
