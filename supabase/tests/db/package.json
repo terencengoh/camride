@@ -1,0 +1,10 @@
+{
+  "name": "camride-db-tests",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node --test" },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.17",
+    "@electric-sql/pglite-postgis": "0.2.17"
+  }
+}
