@@ -3,9 +3,9 @@ name: CI
 on:
   push:
     branches: [main]
-    paths: ["mobile/**", "supabase/**", ".github/workflows/ci.yml"]
+    paths: ["mobile/**", "admin/**", "supabase/**", ".github/workflows/ci.yml"]
   pull_request:
-    paths: ["mobile/**", "supabase/**", ".github/workflows/ci.yml"]
+    paths: ["mobile/**", "admin/**", "supabase/**", ".github/workflows/ci.yml"]
   workflow_dispatch:
 
 permissions:
@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   mobile:
-    name: Mobile (typecheck + lint)
+    name: Mobile (typecheck + lint + doctor + export)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -33,6 +33,28 @@ jobs:
       - run: npx tsc --noEmit
       - run: npx expo lint
       - run: npx expo-doctor
+      - name: Bundle Android JS (expo export)
+        run: npx expo export --platform android --output-dir /tmp/expo-export
+      - name: Icon / splash assets decoded
+        run: test -s assets/icon.png && test -s assets/adaptive-icon.png && test -s assets/splash-icon.png && test -s assets/notification-icon.png
+
+  admin:
+    name: Admin dashboard (typecheck + lint + build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: admin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: admin/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run build
 
   functions:
     name: Edge Functions (check + lint + test)
